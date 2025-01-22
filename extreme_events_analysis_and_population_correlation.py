@@ -1,13 +1,19 @@
 """
-This script processes climate data from SMHI and correlates the extreme events
+This script processes climate data from SMHI and correlates extreme events
 with bird population data from the bird database.
 
-The script loads the climate data, identifies extreme events, and summarizes
-the extreme events per year. It then correlates each variable with the bird
-population and saves the correlation matrix. The script also visualizes the
-correlation matrix and the time series of extreme events.
+The script performs the following tasks:
+1. Loads climate data from multiple files, identifies extreme events based on a threshold, 
+   and summarizes the extreme events per year for each variable.
+2. Loads bird population data and correlates extreme events with the total bird population 
+   as well as species-specific populations.
+3. Generates species-specific correlation results and saves them as a CSV file.
+4. Visualizes the correlation matrix for climate variables and bird population, 
+   as well as the time series of extreme events over time.
+5. Creates a grid of heatmaps for species-specific correlations with climate variables.
 
-The results are saved to a folder specified by the user.
+All results, including data summaries, correlation matrices, and visualizations, 
+are saved to a specified results folder.
 """
 import pandas as pd
 import os
