@@ -203,7 +203,7 @@ def main():
     # Keep original column names
     population = pd.read_csv(population_path)
     
-    results_folder = '/home/michael/Education/UoG/Earth Science Master/Thesis/results/new_results'
+    results_folder = '/home/michael/Education/UoG/Earth Science Master/Thesis/results/new_results/extreme_events_analysis_and_population_correlation'
     
     if not os.path.exists(results_folder):
         os.makedirs(results_folder)

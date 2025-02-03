@@ -53,7 +53,7 @@ factor_loadings_df = pd.DataFrame(loadings, columns=['Factor 1', 'Factor 2', 'Fa
 print("Factor Loadings:\n", factor_loadings_df)
 
 # Create results folder if it doesn't exist
-results_folder = '/home/michael/Education/UoG/Earth Science Master/Thesis/results/'
+results_folder = '/home/michael/Education/UoG/Earth Science Master/Thesis/results/new_results/bird_population_factor_analysis_regression'
 if not os.path.exists(results_folder):
     os.makedirs(results_folder)
 
