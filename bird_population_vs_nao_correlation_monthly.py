@@ -1,3 +1,35 @@
+"""
+Bird Population vs. Teleconnection Indices Analysis and Visualization
+
+This script performs the following steps:
+1. Loads bird observation data (including total population per species) using `BirdDataLoader`.
+2. Loads climate data (NAO, AAO, SCAND, EA) with multiple monthly lags using `ClimateDataLoader`.
+3. Merges the bird data and climate data in `DataPreprocessor` to align them by date.
+4. Calculates both Pearson and Spearman correlations between each species' population and the 
+   teleconnection indices (across multiple lags) using `CorrelationAnalyzer` in `BirdPopulationAnalysis`.
+5. Saves the correlation results to a CSV file (location defined by OUTPUT_FILE).
+6. Generates heatmaps and line-plot grids of these correlation results for each teleconnection index 
+   using `CorrelationVisualizer`.
+
+Usage:
+- Simply run this script in a Python environment with the required libraries installed:
+  `python bird_population_vs_nao_correlation_monthly.py`
+- The script will produce:
+  - A CSV file with all correlation results for each species.
+  - Heatmap visualizations (one per teleconnection pattern).
+  - Line plot grids (one per teleconnection pattern) color-coded for positive (blue) and negative (red) correlations.
+
+Dependencies:
+- pandas
+- matplotlib
+- seaborn
+- scipy
+- abc (for abstract classes)
+
+Ensure the file paths at the top of the script are correct for your data files and output destinations. 
+"""
+
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -159,7 +191,7 @@ class CorrelationVisualizer:
         self.output_dir = output_dir
         self.df = pd.read_csv(csv_file)
     
-    def plot_heatmap(self, climate_var, correlation_type="Spearman"):
+    def plot_heatmap(self, climate_var, correlation_type="Pearson"):
         """
         Creates a heatmap of correlations for the given climate variable.
         The heatmap has species on the y-axis and lag (in months) on the x-axis.
@@ -188,7 +220,7 @@ class CorrelationVisualizer:
         plt.close()
         print(f"Heatmap saved to {output_file}")
 
-    def plot_lineplot_grid(self, species_list, climate_var, correlation_type="Spearman", max_lag=12):
+    def plot_lineplot_grid(self, species_list, climate_var, correlation_type="Pearson", max_lag=12):
         """
         Creates a grid of line plots for multiple species.
         
@@ -288,9 +320,9 @@ def main():
     visualizer = CorrelationVisualizer(OUTPUT_FILE, output_dir)
     
     teleconnections = ["NAO", "AAO", "SCAND", "EA"]
-    # Create heatmaps for all teleconnections (Spearman correlations here)
+    # Create heatmaps for all teleconnections (Pearson correlations here)
     for climate_var in teleconnections:
-        visualizer.plot_heatmap(climate_var, "Spearman")
+        visualizer.plot_heatmap(climate_var, "Pearson")
     
     # Read species list from the results CSV and sort them alphabetically.
     df_results = pd.read_csv(OUTPUT_FILE)
@@ -298,7 +330,7 @@ def main():
     
     # Create a grid of line plots for all teleconnections
     for climate_var in teleconnections:
-        visualizer.plot_lineplot_grid(species_list, climate_var, "Spearman", max_lag=12)
+        visualizer.plot_lineplot_grid(species_list, climate_var, "Pearson", max_lag=12)
 
 if __name__ == "__main__":
     main()
