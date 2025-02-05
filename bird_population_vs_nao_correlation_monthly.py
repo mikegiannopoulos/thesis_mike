@@ -159,7 +159,7 @@ class CorrelationVisualizer:
         self.output_dir = output_dir
         self.df = pd.read_csv(csv_file)
     
-    def plot_heatmap(self, climate_var, correlation_type="Pearson"):
+    def plot_heatmap(self, climate_var, correlation_type="Spearman"):
         """
         Creates a heatmap of correlations for the given climate variable.
         The heatmap has species on the y-axis and lag (in months) on the x-axis.
@@ -188,7 +188,7 @@ class CorrelationVisualizer:
         plt.close()
         print(f"Heatmap saved to {output_file}")
 
-    def plot_lineplot_grid(self, species_list, climate_var, correlation_type="Pearson", max_lag=12):
+    def plot_lineplot_grid(self, species_list, climate_var, correlation_type="Spearman", max_lag=12):
         """
         Creates a grid of line plots for multiple species.
         
@@ -239,16 +239,16 @@ class CorrelationVisualizer:
                 # Check if the segment crosses zero.
                 if (y0 >= 0 and y1 >= 0) or (y0 < 0 and y1 < 0):
                     # Entire segment is on one side of zero.
-                    color = "blue" if y0 >= 0 else "red"
+                    color = "mediumblue" if y0 >= 0 else "crimson"
                     ax.plot([x0, x1], [y0, y1], marker="o", color=color)
                 else:
                     # The segment crosses zero. Calculate the crossing point.
                     x_cross = x0 - y0 * (x1 - x0) / (y1 - y0)
                     # Plot from (x0, y0) to (x_cross, 0) with color based on y0.
-                    color0 = "blue" if y0 >= 0 else "red"
+                    color0 = "mediumblue" if y0 >= 0 else "crimson"
                     ax.plot([x0, x_cross], [y0, 0], marker="o", color=color0)
                     # Plot from (x_cross, 0) to (x1, y1) with color based on y1.
-                    color1 = "blue" if y1 >= 0 else "red"
+                    color1 = "mediumblue" if y1 >= 0 else "crimson"
                     ax.plot([x_cross, x1], [0, y1], marker="o", color=color1)
             
             ax.set_title(species)
@@ -288,9 +288,9 @@ def main():
     visualizer = CorrelationVisualizer(OUTPUT_FILE, output_dir)
     
     teleconnections = ["NAO", "AAO", "SCAND", "EA"]
-    # Create heatmaps for all teleconnections (Pearson correlations here)
+    # Create heatmaps for all teleconnections (Spearman correlations here)
     for climate_var in teleconnections:
-        visualizer.plot_heatmap(climate_var, "Pearson")
+        visualizer.plot_heatmap(climate_var, "Spearman")
     
     # Read species list from the results CSV and sort them alphabetically.
     df_results = pd.read_csv(OUTPUT_FILE)
@@ -298,7 +298,7 @@ def main():
     
     # Create a grid of line plots for all teleconnections
     for climate_var in teleconnections:
-        visualizer.plot_lineplot_grid(species_list, climate_var, "Pearson", max_lag=12)
+        visualizer.plot_lineplot_grid(species_list, climate_var, "Spearman", max_lag=12)
 
 if __name__ == "__main__":
     main()
