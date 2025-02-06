@@ -1,147 +1,384 @@
 """
-Bird Population vs. Teleconnection Patterns Analysis 
-
-This script analyzes the correlation between bird population data and 
-four Teleconnection Pattern indexes on a monthly lag basis. 
-
-### Workflow:
-1. **Load & Parse Data**:
-   - Reads species correlation results from a CSV file.
-   - Transforms the data into a long format for easier processing.
-   - Extracts key components from metric column names (Index, Correlation Type, Lag).
-
-2. **Multiple Testing Correction**:
-   - Performs Bonferroni and Benjamini-Hochberg (FDR) corrections to adjust p-values.
-   - Identifies significant correlations using raw p-values and corrected thresholds.
-
-3. **Seasonal Mapping**:
-   - Maps correlation lags to corresponding months and seasons.
-
-4. **Generate Insights**:
-   - Identifies significant correlations based on raw p-values.
-   - Analyzes the distribution of significant correlations across seasons and months.
-   - Computes species-specific seasonal sensitivity.
-
-5. **Save & Visualize**:
-   - Saves significant correlation results as a CSV file.
-   - Generates and saves a bar plot of seasonal correlation counts per index.
-   - Creates and saves a heatmap showing species-specific seasonal sensitivity.
-
-### Outputs:
-- `significant_correlations.csv`: Contains all significant correlation results.
-- `seasonal_counts.png`: Bar plot showing significant correlations by season.
-- `species_season_heatmap.png`: Heatmap of species-specific seasonal sensitivity.
-
-### Configuration:
-- The output directory for results can be set using the `output_dir` variable.
+A complete analysis pipeline for processing, visualizing, and displaying bird species teleconnection relationships.
+Implements improvements for dependency management, robustness, and performance.
 """
 
+import os
+import logging
+from abc import ABC, abstractmethod
+from typing import Dict, Any
 
 import pandas as pd
 import numpy as np
-import os
-from statsmodels.stats.multitest import multipletests
 import matplotlib.pyplot as plt
 import seaborn as sns
+from statsmodels.stats.multitest import multipletests
+
+# Dashboard-related imports
+import dash
+from dash import html, dcc
+from dash.dependencies import Input, Output
+import plotly.express as px
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
 
 # ------------------
-# 0. Configuration
+# Configuration Class (SRP)
 # ------------------
-output_dir = "/home/michael/Education/UoG/Earth Science Master/Thesis/results/new_results/bird_population_vs_nao_correlation_monthly/data_handling"  # <-- Specify output folder here
-os.makedirs(output_dir, exist_ok=True)  # Create folder if it doesn't exist
+class AnalysisConfig:
+    """
+    Configuration for the analysis pipeline.
+    """
+    def __init__(self, output_dir: str, input_path: str):
+        self.output_dir = output_dir
+        self.input_path = input_path
+        self.season_map = {
+            'Winter': [1, 2, 12],
+            'Spring': [3, 4, 5],
+            'Summer': [6, 7, 8],
+            'Autumn': [9, 10, 11]
+        }
 
-
-# ------------------
-# 1. Load & Parse Data
-# ------------------
-df = pd.read_csv('/home/michael/Education/UoG/Earth Science Master/Thesis/results/new_results/bird_population_vs_nao_correlation_monthly/species_correlation_results.csv')
-
-# Melt to long format for easier processing
-id_vars = ['species']
-value_vars = [col for col in df.columns if col != 'species']
-melted = pd.melt(df, id_vars=id_vars, value_vars=value_vars, var_name='metric', value_name='value')
-
-# Split metric into components: Index_CorrelationType_P_LagXM or Index_CorrelationType_LagXM
-melted[['Index', 'CorrelationType', 'Lag']] = melted['metric'].str.extract(
-    r'^([A-Z]+)_(Pearson|Spearman)(_P)?_Lag(\d+)M$'
-)[[0, 1, 3]].rename(columns={0: 'Index', 1: 'CorrelationType', 3: 'Lag'})
-melted['Lag'] = melted['Lag'].astype(int)
-melted['Metric'] = melted['metric'].str.contains('_P_').map({True: 'p_value', False: 'coefficient'})
-
-# Pivot to separate coefficients and p-values
-pivoted = melted.pivot_table(
-    index=['species', 'Index', 'CorrelationType', 'Lag'],
-    columns='Metric',
-    values='value',
-    aggfunc='first'
-).reset_index()
 
 # ------------------
-# 2. Multiple Testing Correction
+# Data Processor (SRP)
 # ------------------
-# Total number of tests
-n_tests = pivoted.shape[0]
-bonferroni_threshold = 0.05 / n_tests
+class DataProcessor:
+    """
+    Loads and transforms the input data.
+    """
+    def __init__(self, config: AnalysisConfig):
+        self.config = config
+        self._validate_paths()
 
-# Apply Benjamini-Hochberg FDR
-p_values = pivoted['p_value'].values
-_, fdr_adjusted_p, _, _ = multipletests(p_values, alpha=0.05, method='fdr_bh')
-pivoted['p_value_fdr'] = fdr_adjusted_p
-pivoted['significant_raw'] = pivoted['p_value'] < 0.05
-pivoted['significant_bonferroni'] = pivoted['p_value'] < bonferroni_threshold
-pivoted['significant_fdr'] = pivoted['p_value_fdr'] < 0.05
+    def _validate_paths(self) -> None:
+        """Ensure the input file exists and create output directory if needed."""
+        if not os.path.exists(self.config.input_path):
+            raise FileNotFoundError(f"Input file {self.config.input_path} not found")
+        os.makedirs(self.config.output_dir, exist_ok=True)
+        logging.info("Input path validated and output directory ensured.")
+
+    def load_and_transform(self) -> pd.DataFrame:
+        """Load CSV and perform melting and pivot transformation."""
+        df = pd.read_csv(self.config.input_path)
+        logging.info("CSV file loaded.")
+        return self._melt_and_split(df)
+
+    def _melt_and_split(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Melts the data frame and extracts metric components using regex.
+        Rows that do not match the expected pattern are dropped with a warning.
+        """
+        id_vars = ['species']
+        value_vars = [col for col in df.columns if col != 'species']
+        melted = pd.melt(df, id_vars=id_vars, value_vars=value_vars, 
+                         var_name='metric', value_name='value')
+        logging.info("DataFrame melted.")
+
+        # Use regex to extract Index, CorrelationType, optional _P marker, and Lag.
+        extracted = melted['metric'].str.extract(
+            r'^([A-Z]+)_(Pearson|Spearman)(?:_P)?_Lag(\d+)M$'
+        )
+        # Check if any rows failed to match
+        if extracted.isnull().any(axis=1).sum() > 0:
+            num_failed = extracted.isnull().any(axis=1).sum()
+            logging.warning(f"{num_failed} rows did not match the expected metric pattern and will be dropped.")
+            valid = extracted.notnull().all(axis=1)
+            melted = melted.loc[valid].reset_index(drop=True)
+            extracted = extracted.loc[valid].reset_index(drop=True)
+
+        # Rename extracted columns appropriately
+        extracted.columns = ['Index', 'CorrelationType', 'Lag']
+        melted = pd.concat([melted, extracted], axis=1)
+        melted['Lag'] = melted['Lag'].astype(int)
+        melted['Metric'] = melted['metric'].str.contains('_P_').map({True: 'p_value', False: 'coefficient'})
+        
+        # Pivot table to get p_value and coefficient in separate columns
+        pivoted = melted.pivot_table(
+            index=['species', 'Index', 'CorrelationType', 'Lag'],
+            columns='Metric',
+            values='value',
+            aggfunc='first'
+        ).reset_index()
+        logging.info("Data transformation complete.")
+        return pivoted
+
 
 # ------------------
-# 3. Seasonal Mapping
+# Statistical Processor (SRP/OCP)
 # ------------------
-def lag_to_season(lag):
-    if lag in [1, 2, 12]:
-        return 'Winter'
-    elif lag in [3, 4, 5]:
-        return 'Spring'
-    elif lag in [6, 7, 8]:
-        return 'Summer'
-    elif lag in [9, 10, 11]:
-        return 'Autumn'
+class StatisticalCorrector:
+    """
+    Applies statistical corrections to the DataFrame.
+    """
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
+        self.n_tests = df.shape[0]
 
-pivoted['Month'] = pivoted['Lag'].apply(lambda x: pd.to_datetime(f'2023-{x}-1').month_name())
-pivoted['Season'] = pivoted['Lag'].apply(lag_to_season)
+    def apply_corrections(self) -> pd.DataFrame:
+        """Apply Bonferroni and FDR corrections."""
+        self.df = self._add_bonferroni()
+        self.df = self._add_fdr()
+        return self.df
+
+    def _add_bonferroni(self) -> pd.DataFrame:
+        threshold = 0.05 / self.n_tests
+        self.df['significant_bonferroni'] = self.df['p_value'] < threshold
+        logging.info("Bonferroni correction applied.")
+        return self.df
+
+    def _add_fdr(self) -> pd.DataFrame:
+        p_values = self.df['p_value'].values
+        _, fdr_adjusted_p, _, _ = multipletests(p_values, alpha=0.05, method='fdr_bh')
+        self.df['p_value_fdr'] = fdr_adjusted_p
+        self.df['significant_fdr'] = self.df['p_value_fdr'] < 0.05
+        logging.info("FDR correction applied.")
+        return self.df
+
 
 # ------------------
-# 4. Generate Insights
+# Season Mapper (SRP)
 # ------------------
-# Filter significant results (using raw p-value < 0.05)
-significant = pivoted[pivoted['significant_raw']].copy()
+class SeasonMapper:
+    """
+    Adds month and season features based on the 'Lag' field.
+    """
+    def __init__(self, config: AnalysisConfig):
+        self.config = config
+        # Build mapping dictionaries once
+        self.month_mapping = {i: pd.to_datetime(f'2023-{i}-1').month_name() for i in range(1, 13)}
+        self.season_mapping = {}
+        for season, months in self.config.season_map.items():
+            for m in months:
+                self.season_mapping[m] = season
 
-# Seasonal analysis
-seasonal_counts = significant.groupby(['Index', 'Season']).size().reset_index(name='counts')
-monthly_counts = significant.groupby(['Index', 'Month']).size().reset_index(name='counts')
+    def add_seasonal_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Map the 'Lag' field to month names and seasons using dictionaries.
+        """
+        df['Month'] = df['Lag'].map(self.month_mapping)
+        df['Season'] = df['Lag'].map(self.season_mapping)
+        logging.info("Seasonal features added.")
+        return df
 
-# Species-season sensitivity
-species_season = significant.groupby(['species', 'Season']).size().reset_index(name='counts')
-heatmap_data = species_season.pivot(index='species', columns='Season', values='counts').fillna(0)
 
 # ------------------
-# 5. Save & Visualize
+# Insight Generator (SRP/OCP)
 # ------------------
-# Save all significant results
-significant_path = os.path.join(output_dir, "significant_correlations.csv")
-significant.to_csv(significant_path, index=False)
+class InsightGenerator:
+    """
+    Generates insights based on significant correlations.
+    """
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
+        # Expecting 'significant_raw' flag to exist.
+        self.significant = df[df['significant_raw']].copy()
 
-# Plot 1: Seasonal Counts by Index
-plt.figure(figsize=(10, 6))
-sns.barplot(data=seasonal_counts, x='Index', y='counts', hue='Season')
-plt.title('Significant Correlations by Season and Index')
-seasonal_plot_path = os.path.join(output_dir, "seasonal_counts.png")
-plt.savefig(seasonal_plot_path)
-plt.close()
+    def generate_all_insights(self) -> Dict[str, Any]:
+        """Generate all insight summaries."""
+        return {
+            'seasonal_counts': self._seasonal_counts(),
+            'monthly_counts': self._monthly_counts(),
+            'species_season': self._species_season()
+        }
 
-# Plot 2: Species Sensitivity Heatmap
-plt.figure(figsize=(12, 8))
-sns.heatmap(heatmap_data, annot=True, cmap='YlGnBu')
-plt.title('Species-Specific Seasonal Sensitivity')
-heatmap_path = os.path.join(output_dir, "species_season_heatmap.png")
-plt.savefig(heatmap_path)
-plt.close()
+    def _seasonal_counts(self) -> pd.DataFrame:
+        return self.significant.groupby(['Index', 'Season']).size().reset_index(name='counts')
 
-print(f"Analysis complete! Results saved to: {os.path.abspath(output_dir)}")
+    def _monthly_counts(self) -> pd.DataFrame:
+        return self.significant.groupby(['Index', 'Month']).size().reset_index(name='counts')
+
+    def _species_season(self) -> pd.DataFrame:
+        return self.significant.groupby(['species', 'Season']).size().reset_index(name='counts')
+
+
+# ------------------
+# Visualization Interface (ISP)
+# ------------------
+class Visualizer(ABC):
+    """
+    Abstract base class for visualizations.
+    """
+    @abstractmethod
+    def visualize(self, data: pd.DataFrame, output_path: str) -> None:
+        pass
+
+
+class SeasonalCountVisualizer(Visualizer):
+    """
+    Visualizes seasonal counts using a barplot.
+    """
+    def visualize(self, data: pd.DataFrame, output_path: str) -> None:
+        plt.figure(figsize=(10, 6))
+        sns.barplot(data=data, x='Index', y='counts', hue='Season')
+        plt.title('Significant Correlations by Season and Index')
+        plt.tight_layout()
+        plt.savefig(output_path)
+        plt.close()
+        logging.info(f"Seasonal count visualization saved to {output_path}")
+
+
+class SpeciesSeasonHeatmap(Visualizer):
+    """
+    Visualizes species-specific seasonal sensitivity as a heatmap.
+    """
+    def visualize(self, data: pd.DataFrame, output_path: str) -> None:
+        heatmap_data = data.pivot(index='species', columns='Season', values='counts').fillna(0)
+        plt.figure(figsize=(12, 8))
+        sns.heatmap(heatmap_data, annot=True, cmap='YlGnBu')
+        plt.title('Species-Specific Seasonal Sensitivity')
+        plt.tight_layout()
+        plt.savefig(output_path)
+        plt.close()
+        logging.info(f"Species-season heatmap saved to {output_path}")
+
+
+# ------------------
+# Dash Dashboard (SRP/OCP)
+# ------------------
+class Dashboard:
+    """
+    A simple Dash dashboard for interactive data exploration.
+    """
+    def __init__(self, data: pd.DataFrame):
+        self.data = data
+        self.app = dash.Dash(__name__)
+        self._setup_layout()
+
+    def _setup_layout(self) -> None:
+        """Set up the dashboard layout with multi-select dropdowns."""
+        self.app.layout = html.Div([
+            html.H1("Bird Species-Teleconnection Relationships"),
+            dcc.Dropdown(
+                id='species-dropdown',
+                options=[{'label': sp, 'value': sp} for sp in sorted(self.data['species'].unique())],
+                value=[self.data['species'].unique()[0]],
+                multi=True
+            ),
+            dcc.Dropdown(
+                id='index-dropdown',
+                options=[{'label': idx, 'value': idx} for idx in sorted(self.data['Index'].unique())],
+                value=[self.data['Index'].unique()[0]],
+                multi=True
+            ),
+            dcc.Graph(id='correlation-plot')
+        ])
+        self._setup_callbacks()
+
+    def _setup_callbacks(self) -> None:
+        """Set up callbacks for interactive filtering."""
+        @self.app.callback(
+            Output('correlation-plot', 'figure'),
+            [Input('species-dropdown', 'value'),
+             Input('index-dropdown', 'value')]
+        )
+        def update_plot(selected_species, selected_indices):
+            # Ensure selected_species and selected_indices are lists
+            if not isinstance(selected_species, list):
+                selected_species = [selected_species]
+            if not isinstance(selected_indices, list):
+                selected_indices = [selected_indices]
+
+            filtered_df = self.data[
+                (self.data['species'].isin(selected_species)) &
+                (self.data['Index'].isin(selected_indices))
+            ]
+            fig = px.scatter(
+                filtered_df,
+                x="Lag",
+                y="coefficient",
+                color="Index",
+                size="p_value",
+                hover_data=["Season", "CorrelationType"],
+                title="Correlations by Lag and Index",
+                color_continuous_scale="RdBu",
+                range_color=[-1, 1]
+            )
+            return fig
+
+    def run(self) -> None:
+        """Run the Dash server."""
+        logging.info("Launching dashboard...")
+        self.app.run_server(debug=True, port=8050)  # Customize port as needed
+
+
+# ------------------
+# Main Orchestrator (DIP)
+# ------------------
+class AnalysisPipeline:
+    """
+    Orchestrates the entire analysis pipeline.
+    """
+    def __init__(self, config: AnalysisConfig):
+        self.config = config
+        self.data = None
+        self.insights = None
+
+    def run(self) -> None:
+        """
+        Execute all steps: data processing, statistical correction,
+        seasonal mapping, insight generation, result saving, and visualization.
+        """
+        # Data processing
+        processor = DataProcessor(self.config)
+        self.data = processor.load_and_transform()
+
+        # Statistical corrections
+        corrector = StatisticalCorrector(self.data)
+        self.data = corrector.apply_corrections()
+        # Define a raw significance flag before further analysis.
+        self.data['significant_raw'] = self.data['p_value'] < 0.05
+
+        # Seasonal mapping
+        season_mapper = SeasonMapper(self.config)
+        self.data = season_mapper.add_seasonal_features(self.data)
+
+        # Generate insights
+        insight_generator = InsightGenerator(self.data)
+        self.insights = insight_generator.generate_all_insights()
+
+        # Save results and generate visualizations
+        self._save_results()
+        self._generate_visualizations()
+        logging.info("Analysis pipeline completed.")
+
+    def launch_dashboard(self) -> None:
+        """Launch the interactive dashboard."""
+        dashboard = Dashboard(self.data)
+        dashboard.run()
+
+    def _save_results(self) -> None:
+        output_path = os.path.join(self.config.output_dir, "significant_correlations.csv")
+        significant_data = self.data[self.data['significant_raw']]
+        significant_data.to_csv(output_path, index=False)
+        logging.info(f"Significant correlations saved to {output_path}")
+
+    def _generate_visualizations(self) -> None:
+        visualizations = {
+            'seasonal_counts': (SeasonalCountVisualizer(), 'seasonal_counts.png'),
+            'species_season': (SpeciesSeasonHeatmap(), 'species_season_heatmap.png')
+        }
+
+        for insight_name, (visualizer, filename) in visualizations.items():
+            output_path = os.path.join(self.config.output_dir, filename)
+            visualizer.visualize(self.insights[insight_name], output_path)
+
+
+# ------------------
+# Execution
+# ------------------
+if __name__ == '__main__':
+    # Define paths (adjust these paths as needed)
+    config = AnalysisConfig(
+        output_dir="/home/michael/Education/UoG/Earth Science Master/Thesis/results/new_results/bird_population_vs_nao_correlation_monthly/data_handling",
+        input_path="/home/michael/Education/UoG/Earth Science Master/Thesis/results/new_results/bird_population_vs_nao_correlation_monthly/species_correlation_results.csv"
+    )
+
+    pipeline = AnalysisPipeline(config)
+    pipeline.run()
+    logging.info(f"Analysis complete! Results saved to: {os.path.abspath(config.output_dir)}")
+    
+    # Uncomment the line below to launch the interactive dashboard
+    # pipeline.launch_dashboard()
