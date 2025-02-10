@@ -1,6 +1,5 @@
 """
-A complete analysis pipeline for processing, visualizing, and displaying bird species teleconnection relationships.
-Implements improvements for dependency management, robustness, and performance.
+A complete analysis pipeline for processing and analyzing bird species teleconnection relationships.
 """
 
 import os
@@ -13,12 +12,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from statsmodels.stats.multitest import multipletests
-
-# Dashboard-related imports
-import dash
-from dash import html, dcc
-from dash.dependencies import Input, Output
-import plotly.express as px
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -236,75 +229,6 @@ class SpeciesSeasonHeatmap(Visualizer):
 
 
 # ------------------
-# Dash Dashboard (SRP/OCP)
-# ------------------
-class Dashboard:
-    """
-    A simple Dash dashboard for interactive data exploration.
-    """
-    def __init__(self, data: pd.DataFrame):
-        self.data = data
-        self.app = dash.Dash(__name__)
-        self._setup_layout()
-
-    def _setup_layout(self) -> None:
-        """Set up the dashboard layout with multi-select dropdowns."""
-        self.app.layout = html.Div([
-            html.H1("Bird Species-Teleconnection Relationships"),
-            dcc.Dropdown(
-                id='species-dropdown',
-                options=[{'label': sp, 'value': sp} for sp in sorted(self.data['species'].unique())],
-                value=[self.data['species'].unique()[0]],
-                multi=True
-            ),
-            dcc.Dropdown(
-                id='index-dropdown',
-                options=[{'label': idx, 'value': idx} for idx in sorted(self.data['Index'].unique())],
-                value=[self.data['Index'].unique()[0]],
-                multi=True
-            ),
-            dcc.Graph(id='correlation-plot')
-        ])
-        self._setup_callbacks()
-
-    def _setup_callbacks(self) -> None:
-        """Set up callbacks for interactive filtering."""
-        @self.app.callback(
-            Output('correlation-plot', 'figure'),
-            [Input('species-dropdown', 'value'),
-             Input('index-dropdown', 'value')]
-        )
-        def update_plot(selected_species, selected_indices):
-            # Ensure selected_species and selected_indices are lists
-            if not isinstance(selected_species, list):
-                selected_species = [selected_species]
-            if not isinstance(selected_indices, list):
-                selected_indices = [selected_indices]
-
-            filtered_df = self.data[
-                (self.data['species'].isin(selected_species)) &
-                (self.data['Index'].isin(selected_indices))
-            ]
-            fig = px.scatter(
-                filtered_df,
-                x="Lag",
-                y="coefficient",
-                color="Index",
-                size="p_value",
-                hover_data=["Season", "CorrelationType"],
-                title="Correlations by Lag and Index",
-                color_continuous_scale="RdBu",
-                range_color=[-1, 1]
-            )
-            return fig
-
-    def run(self) -> None:
-        """Run the Dash server."""
-        logging.info("Launching dashboard...")
-        self.app.run_server(debug=True, port=8050)  # Customize port as needed
-
-
-# ------------------
 # Main Orchestrator (DIP)
 # ------------------
 class AnalysisPipeline:
@@ -344,11 +268,6 @@ class AnalysisPipeline:
         self._generate_visualizations()
         logging.info("Analysis pipeline completed.")
 
-    def launch_dashboard(self) -> None:
-        """Launch the interactive dashboard."""
-        dashboard = Dashboard(self.data)
-        dashboard.run()
-
     def _save_results(self) -> None:
         output_path = os.path.join(self.config.output_dir, "significant_correlations.csv")
         significant_data = self.data[self.data['significant_raw']]
@@ -379,6 +298,3 @@ if __name__ == '__main__':
     pipeline = AnalysisPipeline(config)
     pipeline.run()
     logging.info(f"Analysis complete! Results saved to: {os.path.abspath(config.output_dir)}")
-    
-    # Uncomment the line below to launch the interactive dashboard
-    # pipeline.launch_dashboard()
