@@ -285,7 +285,7 @@ class AnalysisPipeline:
             visualizer.visualize(self.insights[insight_name], output_path)
 
 
-# ------------------
+# ------------------No, it's comma, it's not tab. I'm sure of that. 
 # Execution
 # ------------------
 if __name__ == '__main__':
