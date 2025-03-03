@@ -138,5 +138,5 @@ ax.set_title("Study Area: Bird Survey Locations & Weather Stations\nSwedish West
            fontsize=16, pad=20, fontweight='semibold')
 
 plt.tight_layout()
-plt.savefig('Study_Area_Map.png', dpi=400, bbox_inches='tight')
+plt.savefig('/home/michael/Education/UoG/Earth Science Master/Thesis/results/new_results/plot_bird_weather_stations/Study_Area_Map.png', dpi=400, bbox_inches='tight')
 plt.show()
