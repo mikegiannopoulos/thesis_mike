@@ -3,66 +3,96 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import numpy as np
+import time
+
+# Start timer
+start_time = time.time()
 
 # Load dataset
 file_path = "/home/michael/Education/UoG/Earth Science Master/Thesis/data/all_bird_data/paired_birds_all_climate_data.csv"
 df = pd.read_csv(file_path)
 
 # Load only necessary columns to reduce memory usage
-cols = [col for col in pd.read_csv(file_path, nrows=0).columns 
-        if "_nearest_station" in col] + ["lat", "lon"]
+cols = [col for col in df.columns if "_nearest_station" in col] + ["lat", "lon"]
 df = pd.read_csv(file_path, usecols=cols)
 
-# Optimized weather station processing using vectorized operations
-station_series = pd.concat([df[col] for col in cols if "_nearest_station" in col])
-unique_stations = station_series.dropna().unique()
+# ======================================================================
+# New Station Processing Logic
+# ======================================================================
+def extract_station_coords(variables, df):
+    """Extract unique station coordinates for specific variables"""
+    station_cols = [f"{var}_nearest_station" for var in variables]
+    stations = pd.concat([df[col] for col in station_cols if col in df]).dropna().unique()
+    
+    if len(stations) == 0:
+        return []
+    
+    # Split coordinates and convert to numeric
+    split = pd.Series(stations).str.split('_', expand=True)
+    coords = split.apply(pd.to_numeric, errors='coerce').dropna()
+    return list(zip(coords[1], coords[0]))  # (lon, lat)
 
-if len(unique_stations) > 0:
-    split_stations = pd.Series(unique_stations).str.split('_', expand=True)
-    split_stations.columns = ['lat_str', 'lon_str']
-    coords = (split_stations.apply(pd.to_numeric, errors='coerce')
-              .dropna()
-              .rename(columns={'lat_str': 'lat', 'lon_str': 'lon'}))
-    weather_stations = list(zip(coords['lon'], coords['lat']))
-else:
-    weather_stations = []
+# Define variable categories
+atmospheric_vars = ['air_pressure', 'air_temperature', 'wind']
+oceanographic_vars = ['seawater_level', 'sea_temp', 'wave_height']
 
-# Create figure with optimized features
+# Get coordinates for each category
+atmo_coords = extract_station_coords(atmospheric_vars, df)
+ocean_coords = extract_station_coords(oceanographic_vars, df)
+
+# Find overlapping stations
+atmo_stations = {f"{lat}_{lon}" for lon, lat in atmo_coords}
+ocean_stations = {f"{lat}_{lon}" for lon, lat in ocean_coords}
+common_stations = atmo_stations & ocean_stations
+common_coords = [tuple(map(float, s.split('_')[::-1])) for s in common_stations]
+
+# Remove common stations from individual categories
+atmo_coords = [c for c in atmo_coords if f"{c[1]}_{c[0]}" not in common_stations]
+ocean_coords = [c for c in ocean_coords if f"{c[1]}_{c[0]}" not in common_stations]
+
+# ======================================================================
+# Mapping Section
+# ======================================================================
+# Create figure
 fig, ax = plt.subplots(figsize=(12, 10), 
                       subplot_kw={'projection': ccrs.LambertConformal(central_longitude=12.5)})
 
-# Set map extent first for better performance
+# Set map extent
 ax.set_extent([9, 15.5, 55.5, 59.5], crs=ccrs.PlateCarree())
 
-# Add optimized geographical features
-ax.add_feature(cfeature.OCEAN.with_scale('50m'), facecolor='azure')
+# Add geographical features
+ax.add_feature(cfeature.OCEAN.with_scale('50m'), facecolor='#d4ecff')
 ax.add_feature(cfeature.LAND.with_scale('10m'), facecolor='#f0f0e6', edgecolor='black')
-ax.add_feature(cfeature.LAKES.with_scale('10m'), facecolor='#b0c4de', edgecolor='black')
+ax.add_feature(cfeature.LAKES.with_scale('10m'), facecolor='#b2e2ed', edgecolor='black')
 ax.add_feature(cfeature.COASTLINE.with_scale('10m'), linewidth=1.0, edgecolor='black')
 ax.add_feature(cfeature.BORDERS.with_scale('10m'), linestyle='-', linewidth=0.7, edgecolor='gray')
 
-
-# Plot bird locations with optimized parameters
+# Plot bird locations
 bird_plot = ax.scatter(df["lon"], df["lat"], 
-                      c='#1f77b4',  # More professional blue color
-                      s=200,          # Smaller point size
-                      alpha=0.8, 
+                      c='#46a308', s=200, alpha=0.8,
                       transform=ccrs.PlateCarree(),
-                      edgecolors='none',  # Remove edge for cleaner look
-                      label="Bird Survey Locations",
-                      )
+                      edgecolors='none',
+                      label="Bird Survey Locations")
 
-# Plot weather stations if available
-if weather_stations:
-    station_lons, station_lats = zip(*weather_stations)
-    station_plot = ax.scatter(station_lons, station_lats,
-                            color='#d62728',  # Contrasting red color
-                            marker='^', 
-                            s=220,
-                            transform=ccrs.PlateCarree(),
-                            label="Weather Stations",
-                            edgecolor='black',
-                            linewidth=0.6)
+# Plot weather stations
+station_plots = []
+if atmo_coords:
+    lon, lat = zip(*atmo_coords)
+    station_plots.append(ax.scatter(lon, lat, color='#d62728', marker='^', s=220,
+                                   transform=ccrs.PlateCarree(), edgecolor='black',
+                                   linewidth=0.6, label="Atmospheric Stations"))
+
+if ocean_coords:
+    lon, lat = zip(*ocean_coords)
+    station_plots.append(ax.scatter(lon, lat, color='#1f77b4', marker='^', s=220,
+                                   transform=ccrs.PlateCarree(), edgecolor='black',
+                                   linewidth=0.6, label="Oceanographic Stations"))
+
+if common_coords:
+    lon, lat = zip(*common_coords)
+    station_plots.append(ax.scatter(lon, lat, color='#ff7f0e', marker='^', s=240,
+                                   transform=ccrs.PlateCarree(), edgecolor='black',
+                                   linewidth=0.8, label="Both Station Types"))
 
 # Scale bar using projected coordinates
 def add_proper_scale_bar(ax, location=(0.1, 0.1), length_km=100):
@@ -108,35 +138,30 @@ base_lon = 15  # Eastern part of the map
 base_lat = 59.0  # Northern position
 tip_lat = base_lat + 0.2  # Extend northward
 
-# Add north arrow 
-ax.annotate('', 
-            xy=(base_lon, tip_lat + 0.05),  # Slightly higher arrow tip
-            xytext=(base_lon, base_lat),  
-            arrowprops=dict(arrowstyle='->, head_width=0.5', 
-                            linewidth=4,  # Thicker
-                            color='black'),
-            transform=ccrs.PlateCarree())
+# North Arrow
+base_lon, base_lat = 15, 59.0
+ax.annotate('', xy=(base_lon, base_lat + 0.25), xytext=(base_lon, base_lat),
+           arrowprops=dict(arrowstyle='->, head_width=0.5', linewidth=4, color='black'),
+           transform=ccrs.PlateCarree())
+ax.text(base_lon, base_lat + 0.3, 'N', ha='center', va='bottom',
+       transform=ccrs.PlateCarree(), fontsize=16, fontweight='bold')
 
-ax.text(base_lon, tip_lat + 0.08, 'N',  # Higher text position
-        ha='center', va='bottom', 
-        transform=ccrs.PlateCarree(),
-        fontsize=16, fontweight='bold')
-
-
-# Add gridlines
+# Gridlines and legend
 gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5)
 gl.top_labels = False
 gl.right_labels = False
 
-# Legend with improved styling
-legend = ax.legend(loc='upper left', frameon=True, 
-                   facecolor='white', framealpha=0.9,
-                   fontsize=12, borderpad=1, handletextpad=0.7)
+ax.legend(loc='upper left', frameon=True, facecolor='white', framealpha=0.9,
+         fontsize=12, borderpad=1, handletextpad=0.7)
 
-# Map title 
 ax.set_title("Study Area: Bird Survey Locations & Weather Stations\nSwedish West Coast",
            fontsize=16, pad=20, fontweight='semibold')
 
 plt.tight_layout()
+
+# Execution time tracking
+print(f"\nExecution time: {time.time() - start_time:.2f} seconds")
+
+# Save or show plot
 plt.savefig('/home/michael/Education/UoG/Earth Science Master/Thesis/results/new_results/plot_bird_weather_stations/Study_Area_Map.png', dpi=400, bbox_inches='tight')
 plt.show()
